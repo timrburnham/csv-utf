@@ -3,10 +3,10 @@ import csv
 import sys
 from io import TextIOWrapper
 
-class dialect_pipe(csv.Dialect):
-    delimiter='|'
-    lineterminator='\n'
-    quoting=csv.QUOTE_NONE
+csv.register_dialect('pipe',
+                     delimiter='|',
+                     lineterminator='\n',
+                     quoting=csv.QUOTE_NONE)
 
 def bom_detect(bytes_str):
     encodings = ('utf-8-sig', ('BOM_UTF8',)), \
@@ -28,15 +28,13 @@ def firstline(string):
 
     return string
 
-def csv_stdout(*,
+def csv_stdout(f,
                header=False,
-               delimiters='|,\t',
-               default_encoding=None,
-               output_encoding=None):
-    """Parse arbitrary delimited text from stdin,
-       reformat to pipe-delimited in stdout
-    """
-    peek = sys.stdin.buffer.peek()
+               delimiters=None,
+               input_encoding=None,
+               output_encoding=None,
+               output_dialect=None):
+    peek = f.buffer.peek()
     encoding = bom_detect(peek)
 
     if encoding:
@@ -44,44 +42,72 @@ def csv_stdout(*,
               file=sys.stderr)
 
     else:
-        encoding = default_encoding or 'utf-8'
+        encoding = input_encoding or 'utf-8'
         print('No Unicode BOM, defaulting to {}'.format(encoding),
               file=sys.stderr)
 
-    sys.stdin = TextIOWrapper(sys.stdin.detach(),
-                              encoding=encoding)
-
+    delimiters = delimiters or '|,\t'
     output_encoding = output_encoding or 'utf-8'
+    output_dialect = output_dialect or 'pipe'
     print('Output encoding: {}'.format(output_encoding),
           file=sys.stderr)
+
+    # re-attach input/output with new encodings
+    if f.encoding.lower() != encoding.lower():
+        f = TextIOWrapper(f.detach(),
+                          encoding=encoding)
     sys.stdout = TextIOWrapper(sys.stdout.detach(),
                                encoding=output_encoding)
 
     peek_line = firstline(peek.decode(encoding))
     dialect_auto = csv.Sniffer().sniff(peek_line, delimiters=delimiters)
 
-    if header:
-        sys.stdin.readline()
+    if header: # skip over
+        f.readline()
 
-    reader = csv.reader(sys.stdin, dialect=dialect_auto)
-    writer = csv.writer(sys.stdout, dialect=dialect_pipe())
+    reader = csv.reader(f, dialect=dialect_auto)
+    writer = csv.writer(sys.stdout, dialect=output_dialect)
     writer.writerows(reader)
 
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser()
+    parser.add_argument("FILE",
+                        nargs='?',
+                        default='-',
+                        help="file to open, '-' or omit to pipe from stdin")
     parser.add_argument("--header",
                         action="store_true",
                         help="discard first row")
     parser.add_argument("--delimiters",
-                        help="acceptable delimiters to search for, default '|,\\t'")
-    parser.add_argument("--default-encoding",
-                        help="input encoding to use if no Unicode BOM in file, UTF-8 when not specified")
+                        help="input delimiters to search for, default '|,\\t'")
+    parser.add_argument("--input-encoding",
+                        help="default encoding to use if no Unicode BOM in file, UTF-8 when not specified")
     parser.add_argument("--output-encoding",
                         help="output encoding, UTF-8 when not specified")
+    parser.add_argument("--output-errors",
+                        default="strict",
+                        choices=['strict', 'replace', 'ignore', 'backslashreplace'],
+                        help="response when input string can't be encoded to output-encoding.")
+    parser.add_argument("--output-dialect",
+                        choices=['pipe', 'excel', 'excel-tab', 'unix'],
+                        help="output csv dialect, pipe delimited when not specified")
     args = parser.parse_args()
 
-    csv_stdout(header=args.header,
-               delimiters=args.delimiters or '|,\t',
-               default_encoding=args.default_encoding,
-               output_encoding=args.output_encoding)
+    if args.FILE in ('-', None):
+        csv_stdout(f=sys.stdin,
+                   header=args.header,
+                   delimiters=args.delimiters,
+                   input_encoding=args.input_encoding,
+                   output_encoding=args.output_encoding,
+                   output_dialect=args.output_dialect)
+    else:
+    # TODO: ValueError when --input-encoding doesn't match open file encoding
+    # somehow still works?
+        with open(args.FILE) as f:
+            csv_stdout(f=f,
+                       header=args.header,
+                       delimiters=args.delimiters,
+                       input_encoding=args.input_encoding,
+                       output_encoding=args.output_encoding,
+                       output_dialect=args.output_dialect)
