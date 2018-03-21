@@ -1,26 +1,11 @@
 #!/usr/bin/env python3
-import codecs
 import csv
-import sys
-from io import TextIOWrapper
+from bom_open import bom_open
 
 csv.register_dialect('pipe',
                      delimiter='|',
                      lineterminator='\n',
                      quoting=csv.QUOTE_NONE)
-
-def bom_detect(bytes_str):
-    encodings = ('utf-8-sig', ('BOM_UTF8',)), \
-                ('utf-16', ('BOM_UTF16_LE', 'BOM_UTF16_BE')), \
-                ('utf-32', ('BOM_UTF32_LE', 'BOM_UTF32_BE'))
-
-    for enc, boms in encodings:
-        for bom in boms:
-            magic = getattr(codecs, bom)
-            if bytes_str.startswith(magic):
-                return enc
-
-    return None
 
 def firstline(string):
     for i, char in enumerate(string):
@@ -29,45 +14,23 @@ def firstline(string):
 
     return string
 
-def csv_stdout(f,
+def csv_stdout(f_in,
+               f_out,
                header=False,
                delimiters=None,
-               input_encoding=None,
-               output_encoding=None,
                output_dialect=None):
-    peek = f.buffer.peek()
-    encoding = bom_detect(peek)
-
-    if encoding:
-        print('Detected Unicode BOM: {}'.format(encoding),
-              file=sys.stderr)
-
-    else:
-        encoding = input_encoding or 'utf-8'
-        print('No Unicode BOM, defaulting to {}'.format(encoding),
-              file=sys.stderr)
-
     delimiters = delimiters or '|,\t'
-    output_encoding = output_encoding or 'utf-8'
     output_dialect = output_dialect or 'pipe'
-    print('Output encoding: {}'.format(output_encoding),
-          file=sys.stderr)
 
-    # re-attach input/output with new encodings
-    if f.encoding.lower() != encoding.lower():
-        f = TextIOWrapper(f.detach(),
-                          encoding=encoding)
-    sys.stdout = TextIOWrapper(sys.stdout.detach(),
-                               encoding=output_encoding)
-
-    peek_line = firstline(peek.decode(encoding))
+    peek = f_in.buffer.peek()
+    peek_line = firstline(peek.decode(f_in.encoding))
     dialect_auto = csv.Sniffer().sniff(peek_line, delimiters=delimiters)
 
     if header: # skip over
-        f.readline()
+        f_in.readline()
 
-    reader = csv.reader(f, dialect=dialect_auto)
-    writer = csv.writer(sys.stdout, dialect=output_dialect)
+    reader = csv.reader(f_in, dialect=dialect_auto)
+    writer = csv.writer(f_out, dialect=output_dialect)
     writer.writerows(reader)
 
 if __name__ == "__main__":
@@ -95,20 +58,12 @@ if __name__ == "__main__":
                         help="output csv dialect, pipe delimited when not specified")
     args = parser.parse_args()
 
-    if args.FILE in ('-', None):
-        csv_stdout(f=sys.stdin,
+    with bom_open(args.FILE, encoding=args.input_encoding) as f_in, \
+         bom_open(None, 'w',
+                  encoding=args.output_encoding or 'utf-8',
+                  errors=args.output_errors) as f_out:
+        csv_stdout(f_in=f_in,
+                   f_out=f_out,
                    header=args.header,
                    delimiters=args.delimiters,
-                   input_encoding=args.input_encoding,
-                   output_encoding=args.output_encoding,
                    output_dialect=args.output_dialect)
-    else:
-    # TODO: ValueError when --input-encoding doesn't match open file encoding
-    # somehow still works?
-        with open(args.FILE) as f:
-            csv_stdout(f=f,
-                       header=args.header,
-                       delimiters=args.delimiters,
-                       input_encoding=args.input_encoding,
-                       output_encoding=args.output_encoding,
-                       output_dialect=args.output_dialect)
