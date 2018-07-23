@@ -6,6 +6,11 @@ csv.register_dialect('pipe',
                      delimiter='|',
                      lineterminator='\n',
                      quoting=csv.QUOTE_NONE)
+csv.register_dialect('caret',
+                     delimiter='^',
+                     lineterminator='\r\n',
+                     quoting=csv.QUOTE_NONE,
+                     escapechar='\\')
 
 def firstline(string):
     for i, char in enumerate(string):
@@ -54,7 +59,7 @@ if __name__ == "__main__":
                         choices=['strict', 'replace', 'ignore', 'backslashreplace'],
                         help="response when input string can't be encoded to output-encoding.")
     parser.add_argument("--output-dialect",
-                        choices=['pipe', 'excel', 'excel-tab', 'unix'],
+                        choices=['pipe', 'excel', 'excel-tab', 'unix', 'caret'],
                         help="output csv dialect, pipe delimited when not specified")
     args = parser.parse_args()
 
