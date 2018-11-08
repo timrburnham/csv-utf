@@ -8,7 +8,7 @@ csv.register_dialect('pipe',
                      quoting=csv.QUOTE_NONE)
 csv.register_dialect('caret',
                      delimiter='^',
-                     lineterminator='\r\n',
+                     lineterminator='\n',
                      quoting=csv.QUOTE_NONE,
                      escapechar='\\')
 
@@ -61,9 +61,19 @@ if __name__ == "__main__":
     parser.add_argument("--output-dialect",
                         choices=['pipe', 'excel', 'excel-tab', 'unix', 'caret'],
                         help="output csv dialect, pipe delimited when not specified")
+    parser.add_argument("--output-newlines",
+                        choices=['unix', 'dos'],
+                        help="output newline character, same as input when not specified")
     args = parser.parse_args()
 
-    with bom_open(args.FILE, encoding=args.input_encoding) as f_in, \
+    if args.output_newlines == 'unix':
+        newline = '\n'
+    elif args.output_newlines == 'dos':
+        newline = '\r\n'
+    else:
+        newline = ''
+
+    with bom_open(args.FILE, encoding=args.input_encoding, newline=newline) as f_in, \
          bom_open(None, 'w',
                   encoding=args.output_encoding or 'utf-8',
                   errors=args.output_errors) as f_out:
