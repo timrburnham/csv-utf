@@ -2,21 +2,30 @@
 import csv
 from bom_open import bom_open
 
-csv.register_dialect('pipe',
-                     delimiter='|',
-                     lineterminator='\n',
-                     quoting=csv.QUOTE_NONE)
-csv.register_dialect('caret',
-                     delimiter='^',
-                     lineterminator='\n',
-                     quoting=csv.QUOTE_NONE,
-                     escapechar='\\')
+def register_stock_dialects():
+    csv.register_dialect('pipe',
+                        delimiter='|',
+                        lineterminator='\n',
+                        quoting=csv.QUOTE_MINIMAL)
+    csv.register_dialect('caret',
+                        delimiter='^',
+                        lineterminator='\n',
+                        quoting=csv.QUOTE_MINIMAL)
 
-def create_dialect(delimiter=None, lineterminator=None, quoting=None):
-    csv.register_dialect('custom',
-                         delimiter=delimiter or '|',
-                         lineterminator=lineterminator or '\n',
-                         quoting=csv.QUOTE_NONE)
+def create_dialect(name, delimiter=None, lineterminator=None, quoting=None):
+    quote_map = { 'all': csv.QUOTE_ALL,
+                  'none': csv.QUOTE_NONE,
+                  'minimal': csv.QUOTE_MINIMAL,
+                  'nonnumeric': csv.QUOTE_NONNUMERIC,
+                  None: csv.QUOTE_MINIMAL }
+    terminator_map = { 'dos': '\r\n',
+                       'unix': '\n',
+                       None: '\r\n' }
+
+    csv.register_dialect(name,
+                         delimiter=delimiter or ',',
+                         lineterminator=terminator_map[lineterminator],
+                         quoting=quote_map[quoting])
 
 def firstline(string):
     for i, char in enumerate(string):
@@ -25,103 +34,104 @@ def firstline(string):
     return string
 
 def detect_csv_dialect(f, delimiters=None):
-    delimiters = delimiters or '|,^\t'
+    delimiters = delimiters or '|,\t'
     peek = f.buffer.peek()
     peek_line = firstline(peek.decode(f.encoding))
     dialect_auto = csv.Sniffer().sniff(peek_line, delimiters=delimiters)
     return dialect_auto
 
-def csv_stdout(f_in,
-               f_out,
-               header=False,
-               delimiters=None,
-               output_dialect=None):
-#    delimiters = delimiters or '|,\t'
-
-#    peek = f_in.buffer.peek()
-#    peek_line = firstline(peek.decode(f_in.encoding))
-#    dialect_auto = csv.Sniffer().sniff(peek_line, delimiters=delimiters)
-
-    dialect_auto = detect_csv_dialect(f_in, delimiters=delimiters)
-    output_dialect = output_dialect or 'pipe'
-
+def csv_stdout(f_in, f_out, header, input_dialect, output_dialect):
     if header: # skip over
         f_in.readline()
 
-    reader = csv.reader(f_in, dialect=dialect_auto)
+    reader = csv.reader(f_in, dialect=input_dialect)
     writer = csv.writer(f_out, dialect=output_dialect)
     writer.writerows(reader)
 
-def arg_auto():
-    pass
+def arg_auto(args):
+    with bom_open(args.FILE, encoding=args.input_encoding) as f_in, \
+         bom_open(None, 'w', encoding='utf-8') as f_out:
+        dialect_auto = detect_csv_dialect(f_in, delimiters=args.delimiters)
+        csv_stdout(f_in=f_in,
+                   f_out=f_out,
+                   header=args.header,
+                   input_dialect=dialect_auto,
+                   output_dialect=args.output_dialect)
 
-def arg_dialect():
-    pass
+def arg_dialect(args):
+    with bom_open(args.FILE, encoding=args.input_encoding) as f_in, \
+         bom_open(None, 'w', encoding='utf-8') as f_out:
+        csv_stdout(f_in=f_in,
+                   f_out=f_out,
+                   header=args.header,
+                   input_dialect=args.DIALECT,
+                   output_dialect=args.output_dialect)
 
-def arg_custom():
-    pass
+def arg_custom(args):
+    with bom_open(args.FILE, encoding=args.input_encoding) as f_in, \
+         bom_open(None, 'w', encoding='utf-8') as f_out:
+        create_dialect('custom_input',
+                       delimiter=args.delimiter,
+                       lineterminator=args.newlines,
+                       quoting=args.quoting)
+        csv_stdout(f_in=f_in,
+                   f_out=f_out,
+                   header=args.header,
+                   input_dialect='custom_input',
+                   output_dialect=args.output_dialect)
 
 if __name__ == "__main__":
     import argparse
+    import sys
     parser = argparse.ArgumentParser()
     subparsers = parser.add_subparsers()
 
     # auto csv parser
     parser_auto = subparsers.add_parser('auto',
                                         help='autodetect input csv format')
-    parser_format.add_argument("--delimiters",
+    parser_auto.add_argument("--delimiters",
                                help="input delimiters to search for, default '|,\\t'")
     parser_auto.set_defaults(func=arg_auto)
 
-    # fixed csv format
+    # fixed csv dialect
     parser_dialect = subparsers.add_parser('dialect',
                                            help='use predefined input csv dialect')
     parser_dialect.add_argument("DIALECT",
                         choices=['excel', 'excel-tab', 'pipe', 'unix', 'caret'],
-                        help="output csv dialect, excel format when not specified")
+                        help="output csv dialect, default 'excel'")
     parser_dialect.set_defaults(func=arg_dialect)
 
-    # custom csv format
+    # custom csv dialect
     parser_custom = subparsers.add_parser('custom',
                                           help='define fixed input csv format')
+    parser_custom.add_argument('--delimiter',
+                               help="delimiter character, default ','")
+    parser_custom.add_argument("--newlines",
+                               choices=['dos', 'unix'],
+                               help="newline character, default 'dos'")
+    parser_custom.add_argument("--quoting",
+                               choices=['all', 'none', 'minimal', 'nonnumeric'],
+                               help="quoting for each field, default 'minimal'")
     parser_custom.set_defaults(func=arg_custom)
 
-    parser.add_argument("FILE",
-                        nargs='?',
-                        default='-',
-                        help="file to read, '-' or omit to pipe from stdin")
-    parser.add_argument("--header",
-                        action="store_true",
-                        help="discard first row")
-    parser.add_argument("--input-encoding",
-                        help="default encoding to use if no Unicode BOM in file, UTF-8 when not specified")
-    parser.add_argument("--output-encoding",
-                        help="output encoding, UTF-8 when not specified")
-    parser.add_argument("--output-errors",
-                        default="strict",
-                        choices=['strict', 'replace', 'ignore', 'backslashreplace'],
-                        help="response when input string can't be encoded to output-encoding.")
-    parser.add_argument("--output-dialect",
-                        choices=['excel', 'excel-tab', 'pipe', 'unix', 'caret'],
-                        help="output csv dialect, excel format when not specified")
-    parser.add_argument("--output-newlines",
-                        choices=['unix', 'dos'],
-                        help="output newline character, same as input when not specified")
-    args = parser.parse_args()
+    for p in (parser_auto, parser_dialect, parser_custom):
+        p.add_argument("FILE",
+                            nargs='?',
+                            default='-',
+                            help="file to read, '-' or omit to pipe from stdin")
+        p.add_argument("--header",
+                            action="store_true",
+                            help="discard first row")
+        p.add_argument("--input-encoding",
+                            help="override input character encoding, default UTF-8")
+        p.add_argument("--output-dialect",
+                            default='excel',
+                            choices=['excel', 'excel-tab', 'pipe', 'unix', 'caret'],
+                            help="output csv dialect, default 'excel'")
 
-    if args.output_newlines == 'unix':
-        newline = '\n'
-    elif args.output_newlines == 'dos':
-        newline = '\r\n'
+    if len(sys.argv) == 1:
+        parser.print_usage()
     else:
-        newline = ''
-
-    with bom_open(args.FILE, encoding=args.input_encoding, newline=newline) as f_in, \
-         bom_open(None, 'w',
-                  encoding=args.output_encoding or 'utf-8',
-                  errors=args.output_errors) as f_out:
-        csv_stdout(f_in=f_in,
-                   f_out=f_out,
-                   header=args.header,
-                   delimiters=args.delimiters,
-                   output_dialect=args.output_dialect)
+        register_stock_dialects()
+        args = parser.parse_args()
+        args.func(args)
